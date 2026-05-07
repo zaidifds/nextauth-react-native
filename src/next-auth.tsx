@@ -47,6 +47,97 @@ type SessionProviderProps = {
   baseURL?: string;
 };
 
+const hasValidSession = (sessionData: unknown) => {
+  if (!sessionData || typeof sessionData !== "object") {
+    return false;
+  }
+  return Boolean((sessionData as { user?: unknown }).user);
+};
+
+const normalizeSetCookieHeader = (setCookieHeader: unknown): string | null => {
+  if (Array.isArray(setCookieHeader)) {
+    return setCookieHeader.join("; ");
+  }
+  if (typeof setCookieHeader === "string" && setCookieHeader.trim()) {
+    return setCookieHeader;
+  }
+  return null;
+};
+
+const parseCookiePairs = (cookieHeaderValue: string) => {
+  const cookieMap = new Map<string, string>();
+  const cookiePairs = cookieHeaderValue
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.includes("="));
+
+  cookiePairs.forEach((pair) => {
+    const separatorIndex = pair.indexOf("=");
+    if (separatorIndex <= 0) {
+      return;
+    }
+    const key = pair.slice(0, separatorIndex).trim();
+    const value = pair.slice(separatorIndex + 1);
+    if (!key) {
+      return;
+    }
+    cookieMap.set(key, value);
+  });
+
+  return cookieMap;
+};
+
+const parseSetCookieLines = (rawCookies: string[]) => {
+  const cookieMap = new Map<string, string>();
+
+  rawCookies.forEach((cookie) => {
+    const firstSegment = cookie.split(";")[0]?.trim();
+    if (!firstSegment || !firstSegment.includes("=")) {
+      return;
+    }
+    const separatorIndex = firstSegment.indexOf("=");
+    const key = firstSegment.slice(0, separatorIndex).trim();
+    const value = firstSegment.slice(separatorIndex + 1);
+    if (!key) {
+      return;
+    }
+    cookieMap.set(key, value);
+  });
+
+  return cookieMap;
+};
+
+const toCookieHeaderValue = (cookieMap: Map<string, string>) => {
+  const cookieHeaderValue = Array.from(cookieMap.entries())
+    .map(([key, value]) => `${key}=${value}`)
+    .join("; ");
+
+  return cookieHeaderValue || null;
+};
+
+const mergeCookieHeaders = (existingCookies: string | null, incomingSetCookie: string[]) => {
+  const existingMap = existingCookies ? parseCookiePairs(existingCookies) : new Map<string, string>();
+  const incomingMap = parseSetCookieLines(incomingSetCookie);
+
+  incomingMap.forEach((value, key) => {
+    const isSessionTokenCookie = key.includes("next-auth.session-token");
+    const isEmptyValue = value.trim().length === 0;
+
+    if (isSessionTokenCookie && isEmptyValue && existingMap.get(key)) {
+      console.log(`[sessionCookies] preserve existing ${key}, incoming empty token ignored`);
+      return;
+    }
+
+    existingMap.set(key, value);
+  });
+
+  return toCookieHeaderValue(existingMap);
+};
+
+const logSessionCookies = (label: string, cookieValue: unknown) => {
+  console.log(`[sessionCookies] ${label}:`, cookieValue);
+};
+
 export const SessionProvider: React.FC<SessionProviderProps> = ({
   children,
   baseURL,
@@ -63,15 +154,33 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({
   }, [baseURL]);
 
   useEffect(() => {
-    update()
-      .then((res) => {
-        setData(res);
-        setStatus("authenticated");
-      })
-      .catch(() => {
+    const hydrateSession = async () => {
+      try {
+        const res = await update();
+        if (hasValidSession(res)) {
+          setData(res);
+          setStatus("authenticated");
+          return;
+        }
         setData(null);
         setStatus("unauthenticated");
-      });
+      } catch {
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          const retryRes = await update();
+          if (hasValidSession(retryRes)) {
+            setData(retryRes);
+            setStatus("authenticated");
+            return;
+          }
+        } catch {
+        }
+        setData(null);
+        setStatus("unauthenticated");
+      }
+    };
+
+    hydrateSession();
 
     const handleSignIn = (sessionData: unknown) => {
       setData(sessionData);
@@ -81,7 +190,9 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({
     const handleSignOut = async () => {
       try {
         setData(null);
-        await removeData("sessionCookies");
+        console.log(
+          "[sessionCookies] handleSignOut: removeData disabled for debugging",
+        );
         setStatus("unauthenticated");
       } catch (error) {
         console.error("Error signing out:", error);
@@ -89,7 +200,7 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({
     };
 
     const handleSessionUpdate = (sessionData: unknown) => {
-      if (sessionData) {
+      if (hasValidSession(sessionData)) {
         setData(sessionData);
         setStatus("authenticated");
         return;
@@ -134,6 +245,9 @@ export const signIn = async (options: Record<string, unknown>) => {
   try {
     const axios = getAuthAxios();
     const csrfResponse = await axios.get("/api/auth/csrf", {
+      headers: {
+        "x-skip-auth-cookie": "true",
+      },
       withCredentials: true,
     });
     const csrfToken = csrfResponse.data.csrfToken;
@@ -160,6 +274,7 @@ export const signIn = async (options: Record<string, unknown>) => {
         {
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
+            "x-skip-auth-cookie": "true",
             Cookie: initialCookies ? initialCookies.join("; ") : "",
           },
           withCredentials: true,
@@ -175,10 +290,19 @@ export const signIn = async (options: Record<string, unknown>) => {
     let sessionCookies = initialCookies ? [...initialCookies] : [];
     if (callbackResponse && callbackResponse.headers["set-cookie"]) {
       const callbackCookies = callbackResponse.headers["set-cookie"];
-      sessionCookies = [...sessionCookies, ...callbackCookies];
+      if (Array.isArray(callbackCookies)) {
+        sessionCookies = [...sessionCookies, ...callbackCookies];
+      } else if (typeof callbackCookies === "string" && callbackCookies.trim()) {
+        sessionCookies = [...sessionCookies, callbackCookies];
+      }
     }
 
-    await saveData("sessionCookies", sessionCookies.join("; "));
+    const cookieHeaderValue = mergeCookieHeaders(null, sessionCookies);
+    if (!cookieHeaderValue) {
+      throw new Error("No session cookies received");
+    }
+    logSessionCookies("signIn saveData payload", cookieHeaderValue);
+    await saveData("sessionCookies", cookieHeaderValue);
     const sessionResponse = await update();
     if (sessionResponse) {
       emitAuthEvent("signIn", sessionResponse);
@@ -206,6 +330,7 @@ export const update = async () => {
   try {
     const axios = getAuthAxios();
     const storedCookies = await getData("sessionCookies");
+    logSessionCookies("update getData result", storedCookies);
     if (!storedCookies) {
       throw new Error("No session found");
     }
@@ -216,19 +341,49 @@ export const update = async () => {
       },
       withCredentials: true,
     });
+    console.log("[sessionCookies] /api/auth/session status:", sessionResponse.status);
+    console.log("[sessionCookies] /api/auth/session data:", sessionResponse.data);
 
-    if (sessionResponse.headers["set-cookie"]) {
-      await saveData(
-        "sessionCookies",
-        sessionResponse.headers["set-cookie"].join("; "),
+    const normalizedCookies = normalizeSetCookieHeader(
+      sessionResponse.headers["set-cookie"],
+    );
+    logSessionCookies("update normalized set-cookie", normalizedCookies);
+    if (normalizedCookies) {
+      const incomingSetCookie = normalizedCookies
+        .split(/,(?=[^;]+?=)/)
+        .map((cookie) => cookie.trim())
+        .filter(Boolean);
+      const cookieHeaderValue = mergeCookieHeaders(storedCookies, incomingSetCookie);
+      if (cookieHeaderValue) {
+        logSessionCookies("update saveData payload", cookieHeaderValue);
+        await saveData("sessionCookies", cookieHeaderValue);
+      }
+    }
+
+    if (!hasValidSession(sessionResponse.data)) {
+      console.log(
+        "[sessionCookies] invalid session: removeData disabled for debugging",
       );
+      emitAuthEvent("sessionUpdate", null);
+      throw new Error("Session is missing user data");
     }
 
     emitAuthEvent("sessionUpdate", sessionResponse.data);
     return sessionResponse.data;
   } catch (error: any) {
-    await removeData("sessionCookies");
-    emitAuthEvent("sessionUpdate", null);
+    const responseStatus = error?.response?.status;
+    const isUnauthorized = responseStatus === 401 || responseStatus === 403;
+    console.log("[sessionCookies] update error status:", responseStatus);
+    console.log("[sessionCookies] update error data:", error?.response?.data);
+    console.log("[sessionCookies] update error message:", error?.message);
+
+    if (isUnauthorized) {
+      console.log(
+        "[sessionCookies] unauthorized: removeData disabled for debugging",
+      );
+      emitAuthEvent("sessionUpdate", null);
+    }
+
     throw new Error(error?.response?.data?.error || error.message);
   }
 };
