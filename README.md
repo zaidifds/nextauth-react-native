@@ -2,7 +2,7 @@
 
 NextAuth helpers for React Native.
 
-This package is built to replicate a NextAuth flow in mobile apps and is compatible with **NextAuth Pages Router** projects.
+This package is built to replicate a NextAuth flow in mobile apps and is compatible with **NextAuth Pages Router** and **App Router** projects.
 
 ## Install
 
@@ -12,8 +12,8 @@ npm i nextauth-react-native
 
 ## Compatibility
 
-- Supports NextAuth endpoints from **Pages Router** (`/api/auth/*`)
-- Not intended for Next.js App Router auth handlers
+- Supports NextAuth endpoints from **Pages Router** (`pages/api/auth/[...nextauth].ts`)
+- Supports NextAuth endpoints from **App Router** (`app/api/auth/[...nextauth]/route.ts`)
 
 ## Quick Start
 
@@ -38,7 +38,7 @@ export default function App() {
 Package auth methods (`signIn`, `useSession`, `update`) use the `baseURL` from `SessionProvider`.
 Session cookies are stored internally by the package.
 
-Your Next.js backend must expose standard NextAuth Pages Router routes like:
+Your Next.js backend must expose standard NextAuth routes like:
 
 - `GET /api/auth/csrf`
 - `POST /api/auth/callback/credentials`
