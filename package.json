@@ -1,6 +1,6 @@
 {
   "name": "nextauth-react-native",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "NextAuth utilities for React Native.",
   "license": "MIT",
   "type": "module",
