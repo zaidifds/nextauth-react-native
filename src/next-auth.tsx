@@ -124,7 +124,7 @@ const mergeCookieHeaders = (existingCookies: string | null, incomingSetCookie: s
     const isEmptyValue = value.trim().length === 0;
 
     if (isSessionTokenCookie && isEmptyValue && existingMap.get(key)) {
-      console.log(`[sessionCookies] preserve existing ${key}, incoming empty token ignored`);
+      // console.log(`[sessionCookies] preserve existing ${key}, incoming empty token ignored`);
       return;
     }
 
@@ -135,7 +135,7 @@ const mergeCookieHeaders = (existingCookies: string | null, incomingSetCookie: s
 };
 
 const logSessionCookies = (label: string, cookieValue: unknown) => {
-  console.log(`[sessionCookies] ${label}:`, cookieValue);
+  // console.log(`[sessionCookies] ${label}:`, cookieValue);
 };
 
 export const SessionProvider: React.FC<SessionProviderProps> = ({
@@ -190,9 +190,10 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({
     const handleSignOut = async () => {
       try {
         setData(null);
-        console.log(
-          "[sessionCookies] handleSignOut: removeData disabled for debugging",
-        );
+        // console.log(
+        //   "[sessionCookies] handleSignOut: removeData disabled for debugging",
+        // );
+        removeData("sessionCookies");
         setStatus("unauthenticated");
       } catch (error) {
         console.error("Error signing out:", error);
@@ -341,8 +342,8 @@ export const update = async () => {
       },
       withCredentials: true,
     });
-    console.log("[sessionCookies] /api/auth/session status:", sessionResponse.status);
-    console.log("[sessionCookies] /api/auth/session data:", sessionResponse.data);
+    // console.log("[sessionCookies] /api/auth/session status:", sessionResponse.status);
+    // console.log("[sessionCookies] /api/auth/session data:", sessionResponse.data);
 
     const normalizedCookies = normalizeSetCookieHeader(
       sessionResponse.headers["set-cookie"],
@@ -361,9 +362,9 @@ export const update = async () => {
     }
 
     if (!hasValidSession(sessionResponse.data)) {
-      console.log(
-        "[sessionCookies] invalid session: removeData disabled for debugging",
-      );
+      // console.log(
+      //   "[sessionCookies] invalid session: removeData disabled for debugging",
+      // );
       emitAuthEvent("sessionUpdate", null);
       throw new Error("Session is missing user data");
     }
@@ -373,14 +374,14 @@ export const update = async () => {
   } catch (error: any) {
     const responseStatus = error?.response?.status;
     const isUnauthorized = responseStatus === 401 || responseStatus === 403;
-    console.log("[sessionCookies] update error status:", responseStatus);
-    console.log("[sessionCookies] update error data:", error?.response?.data);
-    console.log("[sessionCookies] update error message:", error?.message);
+    // console.log("[sessionCookies] update error status:", responseStatus);
+    // console.log("[sessionCookies] update error data:", error?.response?.data);
+    // console.log("[sessionCookies] update error message:", error?.message);
 
     if (isUnauthorized) {
-      console.log(
-        "[sessionCookies] unauthorized: removeData disabled for debugging",
-      );
+      // console.log(
+      //   "[sessionCookies] unauthorized: removeData disabled for debugging",
+      // );
       emitAuthEvent("sessionUpdate", null);
     }
 
