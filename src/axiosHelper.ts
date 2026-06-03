@@ -29,8 +29,6 @@ const attachAuthInterceptors = (instance: AxiosInstance) => {
           headers.Cookie = cookies;
         }
       }
-      console.log("[sessionCookies] axios request url:", config.url);
-      console.log("[sessionCookies] axios request has cookies:", Boolean(cookies));
       return config;
     },
     (error) => Promise.reject(error),
